@@ -29,6 +29,10 @@ use serde_json::{Value, json};
 
 use crate::{EngineError, Result, Session};
 
+fn guarded_run<T>(command: &str, run: impl FnOnce() -> Result<T>) -> Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)).unwrap_or_else(|_| Err(EngineError::Internal { cmd: command.to_string() }))
+}
+
 /// Identifies one background job for the session's lifetime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 pub struct JobId(pub u64);
@@ -311,8 +315,7 @@ pub fn run<T: Send + 'static>(
         // The work closure is moved into the thread. If spawning fails (thread limits), there is
         // no way to get it back, so the error is reported instead.
         let spawned = std::thread::Builder::new().name(format!("photocraft-job-{}", id.0)).spawn(move || {
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| work(&wctx).map(|t| Box::new(t) as Payload)))
-                .unwrap_or_else(|_| Err(EngineError::Other(format!("`{label_w}` failed with an internal error (logged); the document is unchanged"))));
+            let r = guarded_run(&label_w, || work(&wctx).map(|t| Box::new(t) as Payload));
             // The receiver is gone when the job was cancelled: nothing to report.
             let _ = tx.send(r);
         });
@@ -639,10 +642,9 @@ impl Session {
         self.color_restrict = crate::channel_cmds::color_restriction(self, id, &run_params);
         self.jobs.spawn = background;
         // Last-resort guard (AGENTS.md, Never crash): a command that panics anyway fails with an
-        // error instead of taking the app down. `edit` only commits a document after its closure
-        // returns, so the documents are unchanged.
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| (spec.run)(self, &run_params)))
-            .unwrap_or_else(|_| Err(EngineError::Other(format!("`{id}` failed with an internal error (logged); the document is unchanged"))));
+        // typed internal error instead of taking the app down. `edit` commits only after its
+        // closure returns; individual commands remain responsible for other side effects.
+        let r = guarded_run(id, || (spec.run)(self, &run_params));
         self.jobs.spawn = false;
         self.coalesce_request = None;
         self.color_restrict = None;
@@ -717,8 +719,7 @@ impl Session {
         self.coalesce_request = coalesce.clone();
         self.color_restrict = *color_restrict;
         let r = match apply {
-            Some(f) => std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self, payload)))
-                .unwrap_or_else(|_| Err(EngineError::Other(format!("`{label}` failed with an internal error (logged); the document is unchanged")))),
+            Some(f) => guarded_run(label, || f(self, payload)),
             None => Err(EngineError::Other("internal error: job applied twice".into())),
         };
         self.coalesce_request = None;

@@ -245,6 +245,25 @@ jobs:
             done
           } >> "$GITHUB_STEP_SUMMARY"
 
+  panic-hunt:
+    name: command panic hunt
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: 1.95.0
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+      # Include the registry sweep as well as the tests for the harness itself.
+      - name: Detect caught and escaped command panics
+        run: cargo test -p photocraft-engine --locked --test panic_hunt -- --include-ignored
+
   fuzz:
     name: fuzz (${{ matrix.target.crate }}/${{ matrix.target.name }})
     # Placeholder: manual trigger only until a nightly schedule is enabled.

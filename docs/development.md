@@ -1,5 +1,7 @@
 # Development guide
 
+See [Quality checks](quality-checks.md) for the PR command panic hunt and its error contract.
+
 ## Prerequisites
 
 - Rust stable (1.95+). Add the web target with `rustup target add wasm32-unknown-unknown`.

@@ -138,6 +138,9 @@ pub enum EngineError {
     NoLayer(LayerId),
     #[error("{0}")]
     Other(String),
+    /// A panic caught at a command or background-job boundary, never a normal input error.
+    #[error("command {cmd} failed with an internal error (logged)")]
+    Internal { cmd: String },
     /// A background job was cancelled (see [`jobs`]); nothing changed.
     #[error("cancelled")]
     Cancelled,

@@ -536,3 +536,10 @@ fn an_inline_job_ctx_lets_another_thread_cancel_inline_work() {
     s.set_inline_job_ctx(None);
     s.execute("filter.blur.gaussianBlur", json!({"radius": 2})).unwrap();
 }
+#[test]
+fn guarded_run_distinguishes_a_panic_from_a_graceful_error() {
+    let panic = super::guarded_run::<()>("test.panic", || panic!("synthetic command panic"));
+    assert!(matches!(panic, Err(crate::EngineError::Internal { cmd }) if cmd == "test.panic"));
+    let invalid = super::guarded_run::<()>("test.params", || Err(crate::EngineError::Other("invalid input".into())));
+    assert!(matches!(invalid, Err(crate::EngineError::Other(_))));
+}

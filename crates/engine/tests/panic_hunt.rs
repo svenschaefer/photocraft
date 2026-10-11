@@ -1,8 +1,8 @@
 //! Fuzz every command with adversarial params; a command must return `Err`, never panic or hang.
 //! (Rule 9 in AGENTS.md.) Each command runs on its own thread with a timeout, so one bad command
-//! can't wedge the run — panics are caught and hangs are reported. Opt-in (slow):
-//! `cargo test -p photocraft-engine --test panic_hunt -- --ignored`.
-use photocraft_engine::{Session, command_specs};
+//! can't wedge the run — panics are caught and hangs are reported. CI includes the slow sweep:
+//! `cargo test -p photocraft-engine --test panic_hunt -- --include-ignored`.
+use photocraft_engine::{EngineError, Session, command_specs};
 use serde_json::{Value, json};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::mpsc;
@@ -24,15 +24,32 @@ fn run_guarded(id: &str, p: &Value) -> Result<(), String> {
     std::thread::spawn(move || {
         let r = catch_unwind(AssertUnwindSafe(|| {
             let mut s = fresh();
-            let _ = s.execute(&id, p);
+            command_result(s.execute(&id, p))
         }));
-        let _ = tx.send(r.is_ok());
+        let _ = tx.send(r.unwrap_or_else(|_| Err("escaped panic".into())));
     });
     match rx.recv_timeout(Duration::from_secs(4)) {
-        Ok(true) => Ok(()),
-        Ok(false) => Err("panicked".into()),
+        Ok(result) => result,
         Err(_) => Err("hung (>4s)".into()),
     }
+}
+
+fn command_result(result: photocraft_engine::Result<Value>) -> Result<(), String> {
+    match result {
+        Err(EngineError::Internal { cmd }) => Err(format!("internal panic in {cmd}")),
+        _ => Ok(()), // Ordinary parameter/precondition errors are expected adversarial outcomes.
+    }
+}
+
+#[test]
+fn caught_internal_panics_fail_the_hunt() {
+    assert!(command_result(Err(EngineError::Internal { cmd: "test.panic".into() })).is_err());
+}
+
+#[test]
+fn graceful_input_errors_are_not_panics() {
+    assert!(command_result(Err(EngineError::BadParams { cmd: "test.params".into(), msg: "bad input".into() })).is_ok());
+    assert!(command_result(Ok(json!({}))).is_ok());
 }
 
 #[test]
